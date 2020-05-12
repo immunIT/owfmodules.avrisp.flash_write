@@ -1,4 +1,4 @@
-# owfmodules.skeleton
-Module base repository
+# owfmodules.avrisp.flash_write
 
-Please read [CONTRIBUTING.md](https://bitbucket.org/octowire/octowire-framework/src/master/CONTRIBUTING.md) to follow the contribution process.
+This module allows dumping AVR MCU which supports programming through the ISP protocol.
+It use the SPI interface with a GPIO port used as the reset line.
