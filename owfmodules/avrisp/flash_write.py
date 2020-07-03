@@ -41,6 +41,12 @@ class FlashWrite(AModule):
             "verify": {"Value": "", "Required": False, "Type": "bool",
                        "Description": "Verify the firmware after the write process", "Default": False},
         }
+        self.advanced_options.update({
+            "start_address": {"Value": "0x00", "Required": False, "Type": "hex",
+                              "Description": "For raw binary only. The starting address\nto write the firmware. "
+                                             "Hex format (0x1FC00).",
+                              "Default": 0},
+        })
         self.dependencies.append("owfmodules.avrisp.device_id>=1.0.0")
         self.extended_addr = None
         self.busy_wait = None
@@ -78,7 +84,7 @@ class FlashWrite(AModule):
         reset.status = 1
         self.logger.handle("Flash memory successfully erased.", self.logger.SUCCESS)
 
-    def verify(self, spi_interface, flash_size, firmware):
+    def verify(self, spi_interface, chunk_size, start_address, chunk):
         low_byte_read = b'\x20'
         high_byte_read = b'\x28'
         load_extended_addr = b'\x4d\x00'
@@ -86,42 +92,34 @@ class FlashWrite(AModule):
         extended_addr = None
 
         # Read flash loop
-        for read_addr in tqdm(range(0, flash_size // 2), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
-                              bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Words "
-                                         "[elapsed: {elapsed} left: {remaining}]"):
+        for word_index in tqdm(range(0, chunk_size // 2), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
+                               bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Words "
+                                          "[elapsed: {elapsed} left: {remaining}]"):
+            address = word_index + (start_address // 2)
             # Load extended address
-            if read_addr >> 16 != extended_addr:
-                extended_addr = read_addr >> 16
+            if address >> 16 != extended_addr:
+                extended_addr = address >> 16
                 spi_interface.transmit(load_extended_addr + bytes([extended_addr]) + b'\x00')
             # Read low byte
-            spi_interface.transmit(low_byte_read + struct.pack(">H", read_addr & 0xFFFF))
+            spi_interface.transmit(low_byte_read + struct.pack(">H", address & 0xFFFF))
             dump.write(spi_interface.receive(1))
             # Read high byte
-            spi_interface.transmit(high_byte_read + struct.pack(">H", read_addr & 0xFFFF))
+            spi_interface.transmit(high_byte_read + struct.pack(">H", address & 0xFFFF))
             dump.write(spi_interface.receive(1))
 
+        # Start verification
         self.logger.handle("Verifying...", self.logger.INFO)
-        for index, byte in enumerate(firmware):
+        for index, byte in enumerate(chunk):
             if byte != dump.getvalue()[index]:
                 self.logger.handle("verification error, first mismatch at byte 0x{:04x}"
                                    "\n\t\t0x{:04x} != 0x{:04x}".format(index, byte, dump.getvalue()[index]),
                                    self.logger.ERROR)
-                break
+                dump.close()
+                return False
         else:
-            self.logger.handle("{} bytes of flash successfully verified".format(len(firmware)), self.logger.SUCCESS)
-        dump.close()
-
-    def loading_firmware(self, firmware_file):
-        try:
-            with open(firmware_file, 'r') as file:
-                ihex_firmware = hexformat.intelhex.IntelHex.fromihexfh(file)
-                self.logger.handle("IntelHex format detected..", self.logger.INFO)
-                firmware = ihex_firmware.get(address=0x00, size=ihex_firmware.usedsize())
-        except (UnicodeDecodeError, hexformat.base.DecodeError, ValueError):
-            self.logger.handle("Raw binary format detected..", self.logger.INFO)
-            with open(firmware_file, 'rb') as file:
-                firmware = bytearray(file.read())
-        return firmware
+            self.logger.handle("{} bytes of flash successfully verified".format(len(chunk)), self.logger.SUCCESS)
+            dump.close()
+            return True
 
     def _wait_poll_rdybsy(self, spi_interface, page_buffer, page_addr):
         while spi_interface.transmit_receive(b'\xF0\x00\x00\x00')[-1] & 0x01:
@@ -180,12 +178,13 @@ class FlashWrite(AModule):
         # Wait the MCU finish writing the page buffer
         self.busy_wait(spi_interface, page_buffer, page_addr)
 
-    def write(self, spi_interface, reset, device, firmware):
+    def write(self, spi_interface, reset, device, chunk, address, chunk_nb=None, chunks=None):
         enable_mem_access_cmd = b'\xac\x53\x00\x00'
-        gesize = int(device["flash_pagesize"], 16)
+        flash_pagesize = int(device["flash_pagesize"], 16)
         verify = self.options["verify"]["Value"]
-
         page_buffer = bytearray(flash_pagesize)
+        start_address = address
+        hex_address = "0x{:04x}".format(start_address)
 
         # Drive reset low
         reset.status = 0
@@ -194,26 +193,40 @@ class FlashWrite(AModule):
         spi_interface.transmit(enable_mem_access_cmd)
         time.sleep(0.5)
 
-        for page_addr in tqdm(range(0, len(firmware), flash_pagesize), desc="Program", ascii=" #",
-                              bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} pages "
-                                         "[elapsed: {elapsed} left: {remaining}]"):
+        if chunk_nb is not None and chunks is not None:
+            self.logger.handle(f"Writing chunk {chunk_nb}/{chunks} (start address: {hex_address})", self.logger.INFO)
+        else:
+            self.logger.handle(f"Writing firmware (start address: {hex_address})", self.logger.INFO)
+
+        for page in tqdm(range(0, len(chunk), flash_pagesize), desc="Program", ascii=" #",
+                         bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} pages "
+                                    "[elapsed: {elapsed} left: {remaining}]"):
             # Init empty page in case len(page_buffer) < flash_pagesize
             for index in range(flash_pagesize):
                 page_buffer[index] = 0xFF
             # Fulfill the buffer
-            for index, byte in enumerate(firmware[page_addr:page_addr + flash_pagesize]):
+            for index, byte in enumerate(chunk[page:page + flash_pagesize]):
                 page_buffer[index] = byte
             # If page is empty, skip the current page (erased chip byte is already equal to 0xFF)
             if all([v == 0xFF for v in page_buffer]):
                 continue
-            self.program_page(spi_interface, page_buffer, page_addr)
+            self.program_page(spi_interface, page_buffer, address)
+            address = address + flash_pagesize
 
-        self.logger.handle("Successfully write {} byte(s) to flash memory.".format(len(firmware)), self.logger.SUCCESS)
+        self.logger.handle(f"Successfully write {len(chunk)} byte(s) to flash memory at address {start_address}.",
+                           self.logger.SUCCESS)
 
         if verify:
-            self.logger.handle("Start verifying flash memory against {}".format(self.options["firmware"]["Value"]))
-            self.verify(spi_interface, int(device["flash_size"], 16), firmware)
-
+            hex_address = "0x{:04x}".format(start_address)
+            if chunk_nb is not None and chunks is not None:
+                self.logger.handle(f"Start verifying chunk {chunk_nb}/{chunks} (start address: {hex_address})")
+            else:
+                self.logger.handle(f"Start verifying flash memory against {self.options['firmware']['Value']} "
+                                   f"(start address: {hex_address})")
+            if not self.verify(spi_interface, len(chunk), start_address, chunk):
+                # Drive reset high
+                reset.status = 1
+                return
         # Drive reset high
         reset.status = 1
 
@@ -246,14 +259,27 @@ class FlashWrite(AModule):
         else:
             self.busy_wait = self._wait_poll_flash
 
-        # Loading firmware
-        firmware = self.loading_firmware(self.options["firmware"]["Value"])
-        if len(firmware) > int(device["flash_size"], 16):
-            self.logger.handle("The firmware size is larger than the flash size, exiting..", self.logger.ERROR)
-            return
-
-        # Program the device
-        self.write(spi_interface, reset, device, firmware)
+        # Loading the firmware and call the write function with the needed arguments
+        try:
+            with open(self.options["firmware"]["Value"], 'r') as file:
+                ihex_firmware = hexformat.intelhex.IntelHex.fromihexfh(file)
+                self.logger.handle("IntelHex format detected..", self.logger.INFO)
+                # Program the device
+                print(f"Chunks = {len(ihex_firmware.parts())}")
+                chunks = len(ihex_firmware.parts())
+                chunk_nb = 1
+                # For each parts in the ihex file, write it to the correct address in the flash memory.
+                for chunk in ihex_firmware.parts():
+                    chunk_addr, chunk_len = chunk
+                    print(f"part address: {chunk_addr} / part length: {chunk_len}")
+                    chunk = ihex_firmware.get(address=chunk_addr, size=chunk_len)
+                    self.write(spi_interface, reset, device, chunk, chunk_addr, chunk_nb, chunks)
+                    chunk_nb = chunk_nb + 1
+        except (UnicodeDecodeError, hexformat.base.DecodeError, ValueError):
+            self.logger.handle("Raw binary format detected..", self.logger.INFO)
+            with open(self.options["firmware"]["Value"], 'rb') as file:
+                firmware = bytearray(file.read())
+                self.write(spi_interface, reset, device, firmware, self.advanced_options["start_address"]["Value"])
 
     def run(self):
         """
