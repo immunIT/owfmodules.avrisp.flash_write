@@ -265,13 +265,11 @@ class FlashWrite(AModule):
                 ihex_firmware = hexformat.intelhex.IntelHex.fromihexfh(file)
                 self.logger.handle("IntelHex format detected..", self.logger.INFO)
                 # Program the device
-                print(f"Chunks = {len(ihex_firmware.parts())}")
                 chunks = len(ihex_firmware.parts())
                 chunk_nb = 1
                 # For each parts in the ihex file, write it to the correct address in the flash memory.
                 for chunk in ihex_firmware.parts():
                     chunk_addr, chunk_len = chunk
-                    print(f"part address: {chunk_addr} / part length: {chunk_len}")
                     chunk = ihex_firmware.get(address=chunk_addr, size=chunk_len)
                     self.write(spi_interface, reset, device, chunk, chunk_addr, chunk_nb, chunks)
                     chunk_nb = chunk_nb + 1
