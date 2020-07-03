@@ -268,8 +268,8 @@ class FlashWrite(AModule):
                 chunks = len(ihex_firmware.parts())
                 chunk_nb = 1
                 # For each parts in the ihex file, write it to the correct address in the flash memory.
-                for chunk in ihex_firmware.parts():
-                    chunk_addr, chunk_len = chunk
+                for ihex_part in ihex_firmware.parts():
+                    chunk_addr, chunk_len = ihex_part
                     chunk = ihex_firmware.get(address=chunk_addr, size=chunk_len)
                     self.write(spi_interface, reset, device, chunk, chunk_addr, chunk_nb, chunks)
                     chunk_nb = chunk_nb + 1
