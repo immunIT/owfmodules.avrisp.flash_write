@@ -23,7 +23,7 @@ class FlashWrite(AModule):
     def __init__(self, owf_config):
         super(FlashWrite, self).__init__(owf_config)
         self.meta.update({
-            'name': 'AVR write flash memory',
+            'name': 'AVR flash memory write',
             'version': '1.0.0',
             'description': 'Write the flash memory of AVR microcontrollers',
             'author': 'Jordan Ovrè / Ghecko <jovre@immunit.ch>, Paul Duncan / Eresse <pduncan@immunit.ch>'
