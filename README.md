@@ -1,4 +1,4 @@
 # owfmodules.avrisp.flash_write
 
-This module allows dumping AVR MCU which supports programming through the ISP protocol.
-It use the SPI interface with a GPIO port used as the reset line.
+Write the flash memory of AVR microcontrollers through the ISP protocol.
+It uses the SPI interface and a GPIO as reset line.

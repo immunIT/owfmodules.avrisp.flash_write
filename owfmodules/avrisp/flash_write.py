@@ -25,21 +25,21 @@ class FlashWrite(AModule):
         self.meta.update({
             'name': 'AVR write flash memory',
             'version': '1.0.0',
-            'description': 'Module to write the flash memory of an AVR device using the ISP protocol.',
+            'description': 'Write the flash memory of AVR microcontrollers',
             'author': 'Jordan Ovrè / Ghecko <jovre@immunit.ch>, Paul Duncan / Eresse <pduncan@immunit.ch>'
         })
         self.options = {
             "spi_bus": {"Value": "", "Required": True, "Type": "int",
-                        "Description": "The octowire SPI bus (0=SPI0 or 1=SPI1)", "Default": 0},
+                        "Description": "SPI bus (0=SPI0 or 1=SPI1)", "Default": 0},
             "reset_line": {"Value": "", "Required": True, "Type": "int",
-                           "Description": "The octowire GPIO used as the Reset line", "Default": 0},
+                           "Description": "GPIO used as the Reset line", "Default": 0},
             "spi_baudrate": {"Value": "", "Required": True, "Type": "int",
-                             "Description": "set SPI baudrate (1000000 = 1MHz) maximum = 50MHz", "Default": 1000000},
+                             "Description": "SPI frequency (1000000 = 1MHz) maximum = 50MHz", "Default": 1000000},
             "firmware": {"Value": "", "Required": True, "Type": "file_r",
-                         "Description": "The firmware to write into the flash memory.\n"
-                                        "Allowed file type: IntelHex or Raw binary.", "Default": ""},
+                         "Description": "Firmware to write into the flash memory.\n"
+                                        "Allowed file types: IntelHex or Raw binary.", "Default": ""},
             "verify": {"Value": "", "Required": False, "Type": "bool",
-                       "Description": "Verify the firmware after the write process", "Default": False},
+                       "Description": "Verify the firmware after writing", "Default": False},
         }
         self.advanced_options.update({
             "start_address": {"Value": "0x00", "Required": False, "Type": "hex",
@@ -67,10 +67,11 @@ class FlashWrite(AModule):
 
         # Drive reset low
         reset.status = 0
+        self.logger.handle("Enabling Memory Access...", self.logger.INFO)
 
-        self.logger.handle("Enable Memory Access...", self.logger.INFO)
         # Drive reset low
         reset.status = 0
+
         # Enable Memory Access
         spi_interface.transmit(enable_mem_access_cmd)
         time.sleep(0.5)
@@ -92,7 +93,7 @@ class FlashWrite(AModule):
         extended_addr = None
 
         # Read flash loop
-        for word_index in tqdm(range(0, chunk_size // 2), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
+        for word_index in tqdm(range(0, chunk_size // 2), desc="Reading", unit_divisor=1024, ascii=" #", unit_scale=True,
                                bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Words "
                                           "[elapsed: {elapsed} left: {remaining}]"):
             address = word_index + (start_address // 2)
@@ -189,7 +190,7 @@ class FlashWrite(AModule):
         # Drive reset low
         reset.status = 0
         # Enable Memory Access
-        self.logger.handle("Enable Memory Access...", self.logger.INFO)
+        self.logger.handle("Enabling Memory Access...", self.logger.INFO)
         spi_interface.transmit(enable_mem_access_cmd)
         time.sleep(0.5)
 
@@ -198,7 +199,7 @@ class FlashWrite(AModule):
         else:
             self.logger.handle(f"Writing firmware (start address: {hex_address})", self.logger.INFO)
 
-        for page in tqdm(range(0, len(chunk), flash_pagesize), desc="Program", ascii=" #",
+        for page in tqdm(range(0, len(chunk), flash_pagesize), desc="Programming", ascii=" #",
                          bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} pages "
                                     "[elapsed: {elapsed} left: {remaining}]"):
             # Init empty page in case len(page_buffer) < flash_pagesize
@@ -213,15 +214,15 @@ class FlashWrite(AModule):
             self.program_page(spi_interface, page_buffer, address)
             address = address + flash_pagesize
 
-        self.logger.handle(f"Successfully write {len(chunk)} byte(s) to flash memory at address {start_address}.",
+        self.logger.handle(f"Successfully wrote {len(chunk)} bytes to flash memory at address {start_address}.",
                            self.logger.SUCCESS)
 
         if verify:
             hex_address = "0x{:04x}".format(start_address)
             if chunk_nb is not None and chunks is not None:
-                self.logger.handle(f"Start verifying chunk {chunk_nb}/{chunks} (start address: {hex_address})")
+                self.logger.handle(f"Starting chunk verification {chunk_nb}/{chunks} (start address: {hex_address})")
             else:
-                self.logger.handle(f"Start verifying flash memory against {self.options['firmware']['Value']} "
+                self.logger.handle(f"Starting flash memory verification against {self.options['firmware']['Value']} "
                                    f"(start address: {hex_address})")
             if not self.verify(spi_interface, len(chunk), start_address, chunk):
                 # Drive reset high
@@ -247,7 +248,7 @@ class FlashWrite(AModule):
         # Configure GPIO as output
         reset.direction = GPIO.OUTPUT
 
-        # Active Reset is low
+        # Reset is active-low
         reset.status = 1
 
         # Erase the target chip
@@ -259,7 +260,7 @@ class FlashWrite(AModule):
         else:
             self.busy_wait = self._wait_poll_flash
 
-        # Loading the firmware and call the write function with the needed arguments
+        # Load the firmware and call the write function with the needed arguments
         try:
             with open(self.options["firmware"]["Value"], 'r') as file:
                 ihex_firmware = hexformat.intelhex.IntelHex.fromihexfh(file)
@@ -267,7 +268,7 @@ class FlashWrite(AModule):
                 # Program the device
                 chunks = len(ihex_firmware.parts())
                 chunk_nb = 1
-                # For each parts in the ihex file, write it to the correct address in the flash memory.
+                # For every part in the ihex file, write it to the correct address in flash memory.
                 for ihex_part in ihex_firmware.parts():
                     chunk_addr, chunk_len = ihex_part
                     chunk = ihex_firmware.get(address=chunk_addr, size=chunk_len)
@@ -285,8 +286,8 @@ class FlashWrite(AModule):
         Write the flash memory of an AVR device.
         :return: Nothing.
         """
-        # If detect_octowire is True then Detect and connect to the Octowire hardware. Else, connect to the Octowire
-        # using the parameters that were configured. It sets the self.owf_serial variable if the hardware is found.
+        # If detect_octowire is True then detect and connect to the Octowire hardware. Else, connect to the Octowire
+        # using the parameters that were configured. This sets the self.owf_serial variable if the hardware is found.
         self.connect()
         if not self.owf_serial:
             return
