@@ -24,7 +24,7 @@ class FlashWrite(AModule):
         super(FlashWrite, self).__init__(owf_config)
         self.meta.update({
             'name': 'AVR flash memory write',
-            'version': '1.0.1',
+            'version': '1.0.2',
             'description': 'Write the flash memory of AVR microcontrollers',
             'author': 'Jordan Ovrè / Ghecko <jovre@immunit.ch>, Paul Duncan / Eresse <pduncan@immunit.ch>'
         })
@@ -34,7 +34,8 @@ class FlashWrite(AModule):
             "reset_line": {"Value": "", "Required": True, "Type": "int",
                            "Description": "GPIO used as the Reset line", "Default": 0},
             "spi_baudrate": {"Value": "", "Required": True, "Type": "int",
-                             "Description": "SPI frequency (1000000 = 1MHz) maximum = 50MHz", "Default": 1000000},
+                             "Description": "SPI frequency (1000000 = 1MHz). Minimum: 240kHz - Maximum: 60MHz",
+                             "Default": 1000000},
             "firmware": {"Value": "", "Required": True, "Type": "file_r",
                          "Description": "Firmware to write into the flash memory.\n"
                                         "Allowed file types: IntelHex or Raw binary.", "Default": ""},
